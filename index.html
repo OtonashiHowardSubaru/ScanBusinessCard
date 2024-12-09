@@ -34,7 +34,16 @@
     </select>
     <div id="result"></div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tracking.js/1.1.3/tracking-min.js"></script>
+    <script async src="https://docs.opencv.org/4.5.2/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+
     <script>
+        let cv = null;
+        function onOpenCvReady() {
+            cv = window.cv;
+            console.log('OpenCV.js is ready');
+        }
+
         const lapKernelSelect = document.getElementById('lapKernelSelect');
         let currentLapKernel = 'standard';
         const video = document.getElementById('preview');
@@ -128,8 +137,67 @@
             return totalEdgeStrength / count;
         }
 
+        // 檢測矩形
+        function detectRectangles(src) {
+            if (!cv) return false;
+
+            // 轉換為灰度圖
+            let gray = new cv.Mat();
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+            // 高斯模糊
+            let blur = new cv.Mat();
+            cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+
+            // 邊緣檢測
+            let edges = new cv.Mat();
+            cv.Canny(blur, edges, 50, 150);
+
+            // 找輪廓
+            let contours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+            cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+            let rectangleFound = false;
+            
+            for (let i = 0; i < contours.size(); i++) {
+                let contour = contours.get(i);
+                let approx = new cv.Mat();
+                let perimeter = cv.arcLength(contour, true);
+                cv.approxPolyDP(contour, approx, 0.02 * perimeter, true);
+
+                // 如果近似輪廓有4個點，且面積夠大
+                if (approx.rows === 4) {
+                    let area = cv.contourArea(contour);
+                    let imageArea = src.rows * src.cols;
+                    
+                    // 判斷矩形是否佔據圖像的一定比例
+                    if (area > (imageArea * 0.1) && area < (imageArea * 0.8)) {
+                        rectangleFound = true;
+                        break;
+                    }
+                }
+
+                // 釋放記憶體
+                contour.delete();
+                approx.delete();
+            }
+
+            // 釋放記憶體
+            gray.delete();
+            blur.delete();
+            edges.delete();
+            contours.delete();
+            hierarchy.delete();
+
+            return rectangleFound;
+        }
+
         // 截圖並顯示
         function captureImage() {
+            // 確保OpenCV已載入
+            if (!cv) return;
+
             const currentTime = Date.now();
             if((currentTime - lastCaptureTime) < MIN_CAPTURE_INTERVAL){
               return;
@@ -149,16 +217,28 @@
                 currentLapKernel
             );
 
+            // 將canvas轉換為OpenCV的Mat
+            let src = cv.imread(canvas);
+
+            // 檢測是否存在矩形
+            const hasRectangle = detectRectangles(src);
+
             // 更新分析結果顯示
             analysisResultDiv.innerHTML = `
                 <div class="capture-info">
                     平均亮度: ${averageBrightness.toFixed(2)} 
                     Laplacian平均邊緣: ${averageEdge.toFixed(2)}
+                    矩形檢測: ${hasRectangle ? '已找到' : '未找到'}
                 </div>
             `;
 
+            // 釋放OpenCV記憶體
+            src.delete();
+
             // 判斷是否截圖
-            if (averageBrightness > BRIGHTNESS_THRESHOLD && averageEdge > EDGE_THRESHOLD) {
+            if (averageBrightness > BRIGHTNESS_THRESHOLD && 
+                averageEdge > EDGE_THRESHOLD && 
+                hasRectangle) {
                 const imgElement = document.createElement('img');
                 imgElement.src = canvas.toDataURL('image/jpeg');
                 imgElement.width = 200;
