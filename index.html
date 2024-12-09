@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>名片掃描器</title>
+    <style>
+        #preview {
+            max-width: 100%;
+            display: block;
+            margin: 10px 0;
+        }
+        #result {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .capture-info {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>名片掃描器</h1>
+    <video id="preview" width="640" height="480" autoplay playsinline></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+    <div id="analysisResult"></div>
+    <label for="lapKernelSelect">選擇Laplacian核：</label>
+    <select id="lapKernelSelect">
+        <option value="standard">標準（4鄰接）</option>
+        <option value="8neighbor">8鄰接</option>
+        <option value="xor">XOR</option>
+    </select>
+    <div id="result"></div>
+
+    <script>
+        const lapKernelSelect = document.getElementById('lapKernelSelect');
+        let currentLapKernel = 'standard';
+        const video = document.getElementById('preview');
+        const canvas = document.getElementById('canvas');
+        const analysisResultDiv = document.getElementById('analysisResult');
+        const resultDiv = document.getElementById('result');
+        let stream = null;
+
+        // 亮度和邊緣檢測參數
+        const BRIGHTNESS_THRESHOLD = 120; // 平均亮度閾值
+        const EDGE_THRESHOLD = 13; // Laplacian平均邊緣閾值
+        const CAPTURE_INTERVAL = 500; // 每500毫秒檢測一次
+        const MIN_CAPTURE_INTERVAL = 1000; // 每次截圖間隔
+        let lastCaptureTime = 0;
+
+        // 開啟攝像頭
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                console.error('無法開啟攝像頭', err);
+            }
+        }
+
+        // 計算平均亮度
+        function calculateAverageBrightness(context, width, height) {
+            const imageData = context.getImageData(0, 0, width, height);
+            const data = imageData.data;
+            let totalBrightness = 0;
+
+            for (let i = 0; i < data.length; i += 4) {
+                // 計算每個像素的亮度（灰階）
+                const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                totalBrightness += brightness;
+            }
+
+            return totalBrightness / (width * height);
+        }
+
+        // 計算Laplacian邊緣檢測
+        function calculateLaplacianEdge(context, width, height, lapKernel = 'standard') {
+            const imageData = context.getImageData(0, 0, width, height);
+            const data = imageData.data;
+            
+            // 不同的Laplacian卷積核
+            const lapKernels = {
+                'standard': [
+                    [0, 1, 0],
+                    [1, -4, 1],
+                    [0, 1, 0]
+                ],
+                '8neighbor': [
+                    [1, 1, 1],
+                    [1, -8, 1],
+                    [1, 1, 1]
+                ],
+                'xor': [
+                    [-1, -1, -1],
+                    [-1,  8, -1],
+                    [-1, -1, -1]
+                ]
+            };
+
+            const lap = lapKernels[lapKernel] || lapKernels['standard'];
+
+            let totalEdgeStrength = 0;
+            let count = 0;
+
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    let edgeValue = 0;
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const index = ((y + dy) * width + (x + dx)) * 4;
+                            const grayValue = (data[index] + data[index + 1] + data[index + 2]) / 3;
+                            edgeValue += grayValue * lap[dy + 1][dx + 1];
+                        }
+                    }
+                    totalEdgeStrength += Math.abs(edgeValue);
+                    count++;
+                }
+            }
+
+            return totalEdgeStrength / count;
+        }
+
+        // 截圖並顯示
+        function captureImage() {
+            const currentTime = Date.now();
+            if((currentTime - lastCaptureTime) < MIN_CAPTURE_INTERVAL){
+              return;
+            }
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // 計算平均亮度和邊緣
+            const averageBrightness = calculateAverageBrightness(context, canvas.width, canvas.height);
+            const averageEdge = calculateLaplacianEdge(
+                context, 
+                canvas.width, 
+                canvas.height, 
+                currentLapKernel
+            );
+
+            // 更新分析結果顯示
+            analysisResultDiv.innerHTML = `
+                <div class="capture-info">
+                    平均亮度: ${averageBrightness.toFixed(2)} 
+                    Laplacian平均邊緣: ${averageEdge.toFixed(2)}
+                </div>
+            `;
+
+            // 判斷是否截圖
+            if (averageBrightness > BRIGHTNESS_THRESHOLD && averageEdge > EDGE_THRESHOLD) {
+                const imgElement = document.createElement('img');
+                imgElement.src = canvas.toDataURL('image/jpeg');
+                imgElement.width = 200;
+                resultDiv.appendChild(imgElement);
+                lastCaptureTime = currentTime;
+
+                // 限制最多儲存10張圖片
+                if (resultDiv.children.length > 10) {
+                    resultDiv.removeChild(resultDiv.firstChild);
+                }
+            }
+        }
+
+        // 開始持續分析
+        function startAnalysis() {
+            setInterval(captureImage, CAPTURE_INTERVAL);
+        }
+
+        // 初始化
+        async function init() {
+            await startCamera();
+            video.addEventListener('loadedmetadata', () => {
+                startAnalysis();
+            });
+        }
+
+        // 頁面載入時初始化
+        init();
+
+        // 監聽Laplacian核選擇器
+        lapKernelSelect.addEventListener('change', (e) => {
+            currentLapKernel = e.target.value;
+        });
+    </script>
+</body>
+</html>
