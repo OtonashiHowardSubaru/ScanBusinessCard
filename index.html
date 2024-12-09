@@ -34,7 +34,6 @@
     </select>
     <div id="result"></div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tracking.js/1.1.3/tracking-min.js"></script>
     <script async src="https://docs.opencv.org/4.5.2/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
 
     <script>
@@ -170,10 +169,11 @@
                 if (approx.rows === 4) {
                     let area = cv.contourArea(contour);
                     let imageArea = src.rows * src.cols;
-                    
+
                     // 判斷矩形是否佔據圖像的一定比例
                     if (area > (imageArea * 0.1) && area < (imageArea * 0.8)) {
                         rectangleFound = true;
+                        console.log('有個很大的矩形');
                         break;
                     }
                 }
