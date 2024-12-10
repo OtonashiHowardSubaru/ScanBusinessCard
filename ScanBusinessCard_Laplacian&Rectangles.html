@@ -50,6 +50,7 @@
         const analysisResultDiv = document.getElementById('analysisResult');
         const resultDiv = document.getElementById('result');
         let stream = null;
+        let detectedLineCount = 0; 
 
         // 亮度和邊緣檢測參數
         const BRIGHTNESS_THRESHOLD = 120; // 平均亮度閾值
@@ -205,6 +206,7 @@
               let perimeter = cv.arcLength(contour, true);
               cv.approxPolyDP(contour, approx, approxPolyFactor * perimeter, true);
 
+              detectedLineCount = approx.rows;
               // 如果近似輪廓有4個點，且為矩形
               if (approx.rows === 4 && isRectangleAngle(approx)) {
                   let area = cv.contourArea(contour);
@@ -236,7 +238,10 @@
             if (!cv) return;
 
             const currentTime = Date.now();
-            
+            if((currentTime - lastCaptureTime) < MIN_CAPTURE_INTERVAL){
+              return;
+            }
+
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             const context = canvas.getContext('2d');
@@ -249,29 +254,27 @@
                 canvas.width, 
                 canvas.height, 
                 currentLapKernel
-                );
-                
-                // 將canvas轉換為OpenCV的Mat
-                let src = cv.imread(canvas);
-                
-                // 檢測是否存在矩形
-                const hasRectangle = detectRectangles(src);
+            );
+
+            // 將canvas轉換為OpenCV的Mat
+            let src = cv.imread(canvas);
+
+            // 檢測是否存在矩形
+            const hasRectangle = detectRectangles(src);
 
             // 更新分析結果顯示
             analysisResultDiv.innerHTML = `
-            <div class="capture-info">
-                平均亮度: ${averageBrightness.toFixed(2)} 
-                Laplacian平均邊緣: ${averageEdge.toFixed(2)}
-                矩形檢測: ${hasRectangle ? '已找到' : '未找到'}
-            </div>
+                <div class="capture-info">
+                    平均亮度: ${averageBrightness.toFixed(2)} 
+                    Laplacian平均邊緣: ${averageEdge.toFixed(2)}
+                    矩形檢測: ${hasRectangle ? '已找到' : '未找到'}
+                    檢測到的直線數: ${detectedLineCount}
+                </div>
             `;
-            
+
             // 釋放OpenCV記憶體
             src.delete();
-            
-            if((currentTime - lastCaptureTime) < MIN_CAPTURE_INTERVAL){
-              return;
-            }
+
             // 判斷是否截圖
             if (averageBrightness > BRIGHTNESS_THRESHOLD && 
                 averageEdge > EDGE_THRESHOLD && 
