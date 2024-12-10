@@ -47,7 +47,7 @@
         const BRIGHTNESS_THRESHOLD = 120; // 平均亮度閾值
         const EDGE_THRESHOLD = 13; // Laplacian平均邊緣閾值
         const CAPTURE_INTERVAL = 500; // 每500毫秒檢測一次
-        const MIN_CAPTURE_INTERVAL = 1000; // 每次截圖間隔
+        const MIN_CAPTURE_INTERVAL = 3000; // 每次截圖間隔
         let lastCaptureTime = 0;
 
         // 開啟攝像頭
@@ -131,15 +131,11 @@
         // 截圖並顯示
         function captureImage() {
             const currentTime = Date.now();
-            if((currentTime - lastCaptureTime) < MIN_CAPTURE_INTERVAL){
-              return;
-            }
-
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             const context = canvas.getContext('2d');
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
+            
             // 計算平均亮度和邊緣
             const averageBrightness = calculateAverageBrightness(context, canvas.width, canvas.height);
             const averageEdge = calculateLaplacianEdge(
@@ -147,16 +143,20 @@
                 canvas.width, 
                 canvas.height, 
                 currentLapKernel
-            );
+                );
 
             // 更新分析結果顯示
             analysisResultDiv.innerHTML = `
-                <div class="capture-info">
+            <div class="capture-info">
                     平均亮度: ${averageBrightness.toFixed(2)} 
                     Laplacian平均邊緣: ${averageEdge.toFixed(2)}
                 </div>
             `;
-
+            
+            if((currentTime - lastCaptureTime) < MIN_CAPTURE_INTERVAL){
+              return;
+            }
+            
             // 判斷是否截圖
             if (averageBrightness > BRIGHTNESS_THRESHOLD && averageEdge > EDGE_THRESHOLD) {
                 const imgElement = document.createElement('img');
