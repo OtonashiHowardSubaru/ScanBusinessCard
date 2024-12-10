@@ -45,7 +45,8 @@
 
         // 亮度和邊緣檢測參數
         const BRIGHTNESS_THRESHOLD = 120; // 平均亮度閾值
-        const EDGE_THRESHOLD = 13; // Laplacian平均邊緣閾值
+        const MIN_EDGE_THRESHOLD = 10.5; // 最低Laplacian平均邊緣閾值
+        const MAX_EDGE_THRESHOLD = 14; // 最大Laplacian平均邊緣閾值
         const CAPTURE_INTERVAL = 500; // 每500毫秒檢測一次
         const MIN_CAPTURE_INTERVAL = 3000; // 每次截圖間隔
         const CHECK_WINDOW = 2000; // 兩秒檢查窗口
@@ -158,7 +159,11 @@
             `;
             
             // 紀錄檢測結果
-            const isMatch = averageBrightness > BRIGHTNESS_THRESHOLD && averageEdge > EDGE_THRESHOLD;
+            // 紀錄檢測結果
+            const isMatch = 
+                averageBrightness > BRIGHTNESS_THRESHOLD && 
+                averageEdge > MIN_EDGE_THRESHOLD && 
+                averageEdge < MAX_EDGE_THRESHOLD;
             detectionResults.push({ time: currentTime, match: isMatch });
 
             // 移除超過兩秒的結果
