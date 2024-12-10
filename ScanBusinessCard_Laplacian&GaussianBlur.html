@@ -34,15 +34,7 @@
     </select>
     <div id="result"></div>
 
-    <script async src="https://docs.opencv.org/4.5.2/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
-
     <script>
-        let cv = null;
-        function onOpenCvReady() {
-            cv = window.cv;
-            console.log('OpenCV.js is ready');
-        }
-
         const lapKernelSelect = document.getElementById('lapKernelSelect');
         let currentLapKernel = 'standard';
         const video = document.getElementById('preview');
@@ -55,7 +47,7 @@
         const BRIGHTNESS_THRESHOLD = 120; // 平均亮度閾值
         const EDGE_THRESHOLD = 13; // Laplacian平均邊緣閾值
         const CAPTURE_INTERVAL = 500; // 每500毫秒檢測一次
-        const MIN_CAPTURE_INTERVAL = 1000; // 每次截圖間隔
+        const MIN_CAPTURE_INTERVAL = 3000; // 每次截圖間隔
         let lastCaptureTime = 0;
 
         // 開啟攝像頭
@@ -74,6 +66,72 @@
             }
         }
 
+        // 計算高斯模糊
+        function gaussianBlur(imageData, width, height, kernelSize = 5) {
+            // 創建高斯核
+            const kernel = createGaussianKernel(kernelSize);
+            
+            const resultData = new Uint8ClampedArray(imageData.length);
+            
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    let r = 0, g = 0, b = 0;
+                    let weightSum = 0;
+                    
+                    // 滑動窗口
+                    for (let ky = -Math.floor(kernelSize / 2); ky <= Math.floor(kernelSize / 2); ky++) {
+                        for (let kx = -Math.floor(kernelSize / 2); kx <= Math.floor(kernelSize / 2); kx++) {
+                            const px = x + kx;
+                            const py = y + ky;
+                            if (px >= 0 && px < width && py >= 0 && py < height) {
+                                const idx = (py * width + px) * 4;
+                                const weight = kernel[ky + Math.floor(kernelSize / 2)][kx + Math.floor(kernelSize / 2)];
+                                r += imageData[idx] * weight;
+                                g += imageData[idx + 1] * weight;
+                                b += imageData[idx + 2] * weight;
+                                weightSum += weight;
+                            }
+                        }
+                    }
+                    
+                    const idx = (y * width + x) * 4;
+                    resultData[idx] = r / weightSum;
+                    resultData[idx + 1] = g / weightSum;
+                    resultData[idx + 2] = b / weightSum;
+                    resultData[idx + 3] = imageData[idx + 3];  // 保持 alpha 通道
+                }
+            }
+        
+            return resultData;
+        }
+        // 高斯模糊核心
+        function createGaussianKernel(size) {
+            const sigma = 1.0;
+            const kernel = [];
+            const half = Math.floor(size / 2);
+            
+            let sum = 0;
+            for (let y = -half; y <= half; y++) {
+                const row = [];
+                for (let x = -half; x <= half; x++) {
+                    const value = Math.exp(-(x * x + y * y) / (2 * sigma * sigma)) / (2 * Math.PI * sigma * sigma);
+                    row.push(value);
+                    sum += value;
+                }
+                kernel.push(row);
+            }
+        
+            // 使權重總和為1
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    kernel[y][x] /= sum;
+                }
+            }
+        
+            return kernel;
+        }
+        
+
         // 計算平均亮度
         function calculateAverageBrightness(context, width, height) {
             const imageData = context.getImageData(0, 0, width, height);
@@ -90,10 +148,12 @@
         }
 
         // 計算Laplacian邊緣檢測
-        function calculateLaplacianEdge(context, width, height, lapKernel = 'standard') {
+        function calculateLaplacianEdge(context, width, height, lapKernel = 'standard', kernelSize = 5) {
             const imageData = context.getImageData(0, 0, width, height);
-            const data = imageData.data;
+            let data = imageData.data;
             
+            // 計算前先將畫面高斯模糊
+            data = gaussianBlur(data, width, height, kernelSize);
             // 不同的Laplacian卷積核
             const lapKernels = {
                 'standard': [
@@ -136,112 +196,14 @@
             return totalEdgeStrength / count;
         }
 
-        // 檢測矩形
-        function detectRectangles(src, options = {}) {
-          // 設定預設參數，並允許外部覆蓋
-          const {
-              cannyLowThreshold = 50,     // Canny邊緣檢測下限閾值
-              cannyHighThreshold = 150,   // Canny邊緣檢測上限閾值
-              blurSize = 5,               // 高斯模糊核大小
-              approxPolyFactor = 0.02,    // 邊緣近似因子
-              angleThreshold = 20,        // 角度允許偏差
-              minAreaRatio = 0.1,        // 最小面積比例
-              maxAreaRatio = 0.8          // 最大面積比例
-          } = options;
-      
-          if (!cv) return false;
-      
-          let gray = new cv.Mat();
-          cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-      
-          let blur = new cv.Mat();
-          cv.GaussianBlur(gray, blur, new cv.Size(blurSize, blurSize), 0);
-      
-          let edges = new cv.Mat();
-          cv.Canny(blur, edges, cannyLowThreshold, cannyHighThreshold);
-      
-          let contours = new cv.MatVector();
-          let hierarchy = new cv.Mat();
-          cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
-          
-          function isRectangleAngle(points) {
-            const calculateAngle = (p1, p2, p3) => {
-                const v1x = p2[0] - p1[0];
-                const v1y = p2[1] - p1[1];
-                const v2x = p3[0] - p2[0];
-                const v2y = p3[1] - p2[1];
-                
-                const dotProduct = v1x * v2x + v1y * v2y;
-                const v1Len = Math.sqrt(v1x * v1x + v1y * v1y);
-                const v2Len = Math.sqrt(v2x * v2x + v2y * v2y);
-                
-                const angle = Math.acos(dotProduct / (v1Len * v2Len)) * 180 / Math.PI;
-                return Math.abs(angle - 90);
-            };
-        
-            const pointsArray = [];
-            for (let i = 0; i < 4; i++) {
-                pointsArray.push([
-                    points.data32S[i * 2],
-                    points.data32S[i * 2 + 1]
-                ]);
-            }
-        
-            const angles = [
-                calculateAngle(pointsArray[3], pointsArray[0], pointsArray[1]),
-                calculateAngle(pointsArray[0], pointsArray[1], pointsArray[2]),
-                calculateAngle(pointsArray[1], pointsArray[2], pointsArray[3]),
-                calculateAngle(pointsArray[2], pointsArray[3], pointsArray[0])
-            ];
-        
-            return angles.every(a => a < angleThreshold);
-        }
-      
-          let rectangleFound = false;
-
-          for (let i = 0; i < contours.size(); i++) {
-              let contour = contours.get(i);
-              let approx = new cv.Mat();
-              let perimeter = cv.arcLength(contour, true);
-              cv.approxPolyDP(contour, approx, approxPolyFactor * perimeter, true);
-
-              // 如果近似輪廓有4個點，且為矩形
-              if (approx.rows === 4 && isRectangleAngle(approx)) {
-                  let area = cv.contourArea(contour);
-                  let imageArea = src.rows * src.cols;
-      
-                  // 判斷矩形是否佔據圖像的一定比例
-                  if (area > (imageArea * minAreaRatio) && area < (imageArea * maxAreaRatio)) {
-                      rectangleFound = true;
-                      console.log('找到一個矩形');
-                      break;
-                  }
-              }
-      
-              contour.delete();
-              approx.delete();
-          }
-      
-          gray.delete();
-          blur.delete();
-          edges.delete();
-          contours.delete();
-          hierarchy.delete();
-      
-          return rectangleFound;
-      }
         // 截圖並顯示
         function captureImage() {
-            // 確保OpenCV已載入
-            if (!cv) return;
-
             const currentTime = Date.now();
-            
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             const context = canvas.getContext('2d');
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
+            
             // 計算平均亮度和邊緣
             const averageBrightness = calculateAverageBrightness(context, canvas.width, canvas.height);
             const averageEdge = calculateLaplacianEdge(
@@ -250,32 +212,21 @@
                 canvas.height, 
                 currentLapKernel
                 );
-                
-                // 將canvas轉換為OpenCV的Mat
-                let src = cv.imread(canvas);
-                
-                // 檢測是否存在矩形
-                const hasRectangle = detectRectangles(src);
 
             // 更新分析結果顯示
             analysisResultDiv.innerHTML = `
             <div class="capture-info">
-                平均亮度: ${averageBrightness.toFixed(2)} 
-                Laplacian平均邊緣: ${averageEdge.toFixed(2)}
-                矩形檢測: ${hasRectangle ? '已找到' : '未找到'}
-            </div>
+                    平均亮度: ${averageBrightness.toFixed(2)} 
+                    Laplacian平均邊緣: ${averageEdge.toFixed(2)}
+                </div>
             `;
-            
-            // 釋放OpenCV記憶體
-            src.delete();
             
             if((currentTime - lastCaptureTime) < MIN_CAPTURE_INTERVAL){
               return;
             }
+            
             // 判斷是否截圖
-            if (averageBrightness > BRIGHTNESS_THRESHOLD && 
-                averageEdge > EDGE_THRESHOLD && 
-                hasRectangle) {
+            if (averageBrightness > BRIGHTNESS_THRESHOLD && averageEdge > EDGE_THRESHOLD) {
                 const imgElement = document.createElement('img');
                 imgElement.src = canvas.toDataURL('image/jpeg');
                 imgElement.width = 200;
