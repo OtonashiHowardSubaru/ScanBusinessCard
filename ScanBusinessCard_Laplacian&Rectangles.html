@@ -34,7 +34,6 @@
     </select>
     <div id="result"></div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tracking.js/1.1.3/tracking-min.js"></script>
     <script async src="https://docs.opencv.org/4.5.2/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
 
     <script>
@@ -138,99 +137,62 @@
         }
 
         // 檢測矩形
-        function detectRectangles(src, options = {}) {
-          // 設定預設參數，並允許外部覆蓋
-          const {
-              cannyLowThreshold = 50,     // Canny邊緣檢測下限閾值
-              cannyHighThreshold = 150,   // Canny邊緣檢測上限閾值
-              blurSize = 5,               // 高斯模糊核大小
-              approxPolyFactor = 0.02,    // 邊緣近似因子
-              angleThreshold = 20,        // 角度允許偏差
-              minAreaRatio = 0.1,        // 最小面積比例
-              maxAreaRatio = 0.8          // 最大面積比例
-          } = options;
-      
-          if (!cv) return false;
-      
-          let gray = new cv.Mat();
-          cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-      
-          let blur = new cv.Mat();
-          cv.GaussianBlur(gray, blur, new cv.Size(blurSize, blurSize), 0);
-      
-          let edges = new cv.Mat();
-          cv.Canny(blur, edges, cannyLowThreshold, cannyHighThreshold);
-      
-          let contours = new cv.MatVector();
-          let hierarchy = new cv.Mat();
-          cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
-          
-          function isRectangleAngle(points) {
-            const calculateAngle = (p1, p2, p3) => {
-                const v1x = p2[0] - p1[0];
-                const v1y = p2[1] - p1[1];
-                const v2x = p3[0] - p2[0];
-                const v2y = p3[1] - p2[1];
-                
-                const dotProduct = v1x * v2x + v1y * v2y;
-                const v1Len = Math.sqrt(v1x * v1x + v1y * v1y);
-                const v2Len = Math.sqrt(v2x * v2x + v2y * v2y);
-                
-                const angle = Math.acos(dotProduct / (v1Len * v2Len)) * 180 / Math.PI;
-                return Math.abs(angle - 90);
-            };
-        
-            const pointsArray = [];
-            for (let i = 0; i < 4; i++) {
-                pointsArray.push([
-                    points.data32S[i * 2],
-                    points.data32S[i * 2 + 1]
-                ]);
+        function detectRectangles(src) {
+            if (!cv) return false;
+
+            // 轉換為灰度圖
+            let gray = new cv.Mat();
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+            // 高斯模糊
+            let blur = new cv.Mat();
+            cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
+
+            // 邊緣檢測
+            let edges = new cv.Mat();
+            cv.Canny(blur, edges, 50, 150);
+
+            // 找輪廓
+            let contours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+            cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+            let rectangleFound = false;
+            
+            for (let i = 0; i < contours.size(); i++) {
+                let contour = contours.get(i);
+                let approx = new cv.Mat();
+                let perimeter = cv.arcLength(contour, true);
+                cv.approxPolyDP(contour, approx, 0.02 * perimeter, true);
+
+                // 如果近似輪廓有4個點，且面積夠大
+                if (approx.rows === 4) {
+                    let area = cv.contourArea(contour);
+                    let imageArea = src.rows * src.cols;
+
+                    // 判斷矩形是否佔據圖像的一定比例
+                    if (area > (imageArea * 0.1) && area < (imageArea * 0.8)) {
+                        rectangleFound = true;
+                        console.log('有個很大的矩形');
+                        break;
+                    }
+                }
+
+                // 釋放記憶體
+                contour.delete();
+                approx.delete();
             }
-        
-            const angles = [
-                calculateAngle(pointsArray[3], pointsArray[0], pointsArray[1]),
-                calculateAngle(pointsArray[0], pointsArray[1], pointsArray[2]),
-                calculateAngle(pointsArray[1], pointsArray[2], pointsArray[3]),
-                calculateAngle(pointsArray[2], pointsArray[3], pointsArray[0])
-            ];
-        
-            return angles.every(a => a < angleThreshold);
+
+            // 釋放記憶體
+            gray.delete();
+            blur.delete();
+            edges.delete();
+            contours.delete();
+            hierarchy.delete();
+
+            return rectangleFound;
         }
-      
-          let rectangleFound = false;
 
-          for (let i = 0; i < contours.size(); i++) {
-              let contour = contours.get(i);
-              let approx = new cv.Mat();
-              let perimeter = cv.arcLength(contour, true);
-              cv.approxPolyDP(contour, approx, approxPolyFactor * perimeter, true);
-
-              // 如果近似輪廓有4個點，且為矩形
-              if (approx.rows === 4 && isRectangleAngle(approx)) {
-                  let area = cv.contourArea(contour);
-                  let imageArea = src.rows * src.cols;
-      
-                  // 判斷矩形是否佔據圖像的一定比例
-                  if (area > (imageArea * minAreaRatio) && area < (imageArea * maxAreaRatio)) {
-                      rectangleFound = true;
-                      console.log('找到一個矩形');
-                      break;
-                  }
-              }
-      
-              contour.delete();
-              approx.delete();
-          }
-      
-          gray.delete();
-          blur.delete();
-          edges.delete();
-          contours.delete();
-          hierarchy.delete();
-      
-          return rectangleFound;
-      }
         // 截圖並顯示
         function captureImage() {
             // 確保OpenCV已載入

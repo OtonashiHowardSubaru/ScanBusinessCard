@@ -164,24 +164,42 @@
           let contours = new cv.MatVector();
           let hierarchy = new cv.Mat();
           cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
-      
+          
           function isRectangleAngle(points) {
-              const angles = [];
-              for (let i = 0; i < 4; i++) {
-                  const p1 = points.data32S[i * 2];
-                  const p2 = points.data32S[i * 2 + 1];
-                  const p3 = points.data32S[((i + 1) % 4) * 2];
-                  const p4 = points.data32S[((i + 1) % 4) * 2 + 1];
-                  
-                  const angle = Math.abs(Math.atan2(p3 - p1, p4 - p2) * 180 / Math.PI);
-                  angles.push(Math.abs(90 - angle));
-              }
-              
-              return angles.every(a => a < angleThreshold);
-          }
+            const calculateAngle = (p1, p2, p3) => {
+                const v1x = p2[0] - p1[0];
+                const v1y = p2[1] - p1[1];
+                const v2x = p3[0] - p2[0];
+                const v2y = p3[1] - p2[1];
+                
+                const dotProduct = v1x * v2x + v1y * v2y;
+                const v1Len = Math.sqrt(v1x * v1x + v1y * v1y);
+                const v2Len = Math.sqrt(v2x * v2x + v2y * v2y);
+                
+                const angle = Math.acos(dotProduct / (v1Len * v2Len)) * 180 / Math.PI;
+                return Math.abs(angle - 90);
+            };
+        
+            const pointsArray = [];
+            for (let i = 0; i < 4; i++) {
+                pointsArray.push([
+                    points.data32S[i * 2],
+                    points.data32S[i * 2 + 1]
+                ]);
+            }
+        
+            const angles = [
+                calculateAngle(pointsArray[3], pointsArray[0], pointsArray[1]),
+                calculateAngle(pointsArray[0], pointsArray[1], pointsArray[2]),
+                calculateAngle(pointsArray[1], pointsArray[2], pointsArray[3]),
+                calculateAngle(pointsArray[2], pointsArray[3], pointsArray[0])
+            ];
+        
+            return angles.every(a => a < angleThreshold);
+        }
       
           let rectangleFound = false;
-          
+
           for (let i = 0; i < contours.size(); i++) {
               let contour = contours.get(i);
               let approx = new cv.Mat();
