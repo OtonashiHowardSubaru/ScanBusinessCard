@@ -22,7 +22,7 @@
     </style>
 </head>
 <body>
-    <h1>名片掃描器</h1>
+    <h1>名片掃描器(Laplacian)</h1>
     <video id="preview" width="640" height="480" autoplay playsinline></video>
     <canvas id="canvas" style="display:none;"></canvas>
     <div id="analysisResult"></div>
@@ -152,7 +152,7 @@
                     Laplacian平均邊緣: ${averageEdge.toFixed(2)}
                 </div>
             `;
-            
+
             if((currentTime - lastCaptureTime) < MIN_CAPTURE_INTERVAL){
               return;
             }
