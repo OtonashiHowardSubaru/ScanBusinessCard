@@ -40,12 +40,25 @@
             left: 0;
             transition: all 0.2s ease;
         }
+        .camera-toggle {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 10px 0;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .camera-toggle.active {
+            background-color: #F44336;
+        }
     </style>
 </head>
 <body>
-    <h1>名片掃描器(Laplacian & 2秒內3幀合格 & 顯示狀態條)</h1>
+    <h1>名片掃描器(Laplacian & 2秒內3幀合格 & 顯示狀態條 & 開關鏡頭)</h1>
     <video id="preview" width="640" height="360" autoplay playsinline></video>
     <canvas id="canvas" style="display:none;"></canvas>
+    <button id="cameraToggle" class="camera-toggle">開啟攝像頭</button>
     <div class="statusMeter">
         <div id="statusPointer"></div>
     </div>
@@ -67,34 +80,34 @@
         const lapKernelSelect = document.getElementById('lapKernelSelect');
         const statusPointer = document.getElementById('statusPointer');
         const statusMeter = document.querySelector('.statusMeter');
+        const cameraToggle = document.getElementById('cameraToggle');
         let currentLapKernel = 'standard';
         const video = document.getElementById('preview');
         const canvas = document.getElementById('canvas');
         const analysisResultDiv = document.getElementById('analysisResult');
         const resultDiv = document.getElementById('result');
         let stream = null;
+        let analysisAnimationFrame = null;
 
-        // 亮度和邊緣檢測參數
-        const BRIGHTNESS_THRESHOLD = 120; // 平均亮度閾值
-        const MIN_EDGE_THRESHOLD = 10.5; // 最低Laplacian平均邊緣閾值
-        const MAX_EDGE_THRESHOLD = 14.5; // 最大Laplacian平均邊緣閾值
-        const MAX_EDGE_DISPLAY = 25; // 顯示的最大邊緣值
-        const CAPTURE_INTERVAL = 500; // 每500毫秒檢測一次
-        const CHECK_WINDOW = 2000; // 兩秒檢查窗口
-        const REQUIRED_MATCH_COUNT = 3; // 需要符合3次
-        const MIN_CAPTURE_INTERVAL = 3000; // 每次截圖間隔
+        const BRIGHTNESS_THRESHOLD = 120;
+        const MIN_EDGE_THRESHOLD = 10.5;
+        const MAX_EDGE_THRESHOLD = 14.5;
+        const MAX_EDGE_DISPLAY = 25;
+        const CAPTURE_INTERVAL = 500;
+        const CHECK_WINDOW = 2000;
+        const REQUIRED_MATCH_COUNT = 3;
+        const MIN_CAPTURE_INTERVAL = 3000;
 
         let lastCaptureTime = 0;
         let detectionResults = [];
 
-        // 優化的狀態指示器更新函數
+        // 更新狀態指示器函數
         function updateStatusPointer(averageEdge) {
             requestAnimationFrame(() => {
                 if (!statusMeter || !statusPointer) return;
 
-                const maxWidth = statusMeter.offsetWidth - 30; // 扣除指示器寬度
+                const maxWidth = statusMeter.offsetWidth - 30;
                 
-                // 計算指示器位置
                 let pointerPosition = Math.min(
                     maxWidth, 
                     Math.max(0, (averageEdge / MAX_EDGE_DISPLAY) * maxWidth)
@@ -102,7 +115,6 @@
                 
                 statusPointer.style.left = `${pointerPosition}px`;
 
-                // 設定顏色
                 if (
                     averageEdge >= MIN_EDGE_THRESHOLD && 
                     averageEdge <= MAX_EDGE_THRESHOLD
@@ -121,22 +133,68 @@
                     video: { 
                         width: { ideal: 1280 },
                         height: { ideal: 720 },
-                        facingMode: "environment" // 偏好後置相機
+                        facingMode: "environment"
                     }
                 });
                 video.srcObject = stream;
+                
+                // 更新按鈕狀態
+                cameraToggle.textContent = '關閉攝像頭';
+                cameraToggle.classList.add('active');
+
+                // 等待視頻元數據載入後開始分析
+                video.onloadedmetadata = () => {
+                    startAnalysis();
+                };
             } catch (err) {
                 console.error('無法開啟攝像頭', err);
+                alert('無法開啟攝像頭，請檢查設備');
             }
         }
 
-        // 計算平均亮度（優化版）
+        // 關閉攝像頭
+        function stopCamera() {
+            if (stream) {
+                // 停止所有軌道
+                stream.getTracks().forEach(track => track.stop());
+                
+                // 清空視頻源
+                video.srcObject = null;
+                stream = null;
+
+                // 停止分析
+                if (analysisAnimationFrame) {
+                    cancelAnimationFrame(analysisAnimationFrame);
+                }
+
+                // 重置按鈕
+                cameraToggle.textContent = '開啟攝像頭';
+                cameraToggle.classList.remove('active');
+
+                // 清空分析結果
+                analysisResultDiv.innerHTML = '';
+                statusPointer.style.left = '0px';
+            }
+        }
+
+        // 攝像頭開關切換
+        function toggleCamera() {
+            if (stream) {
+                stopCamera();
+            } else {
+                startCamera();
+            }
+        }
+
+        // 綁定攝像頭開關按鈕
+        cameraToggle.addEventListener('click', toggleCamera);
+
+        // 計算平均亮度
         function calculateAverageBrightness(imageData) {
             const data = imageData.data;
             let totalBrightness = 0;
 
             for (let i = 0; i < data.length; i += 4) {
-                // 快速計算每個像素的亮度（使用加權平均）
                 const brightness = 
                     0.299 * data[i] + 
                     0.587 * data[i + 1] + 
@@ -147,13 +205,12 @@
             return totalBrightness / (imageData.width * imageData.height);
         }
 
-        // 計算Laplacian邊緣檢測（優化版）
+        // 計算Laplacian邊緣檢測
         function calculateLaplacianEdge(imageData, lapKernel = 'standard') {
             const data = imageData.data;
             const width = imageData.width;
             const height = imageData.height;
             
-            // 不同的Laplacian卷積核（保持不變）
             const lapKernels = {
                 'standard': [
                     [0, 1, 0],
@@ -213,20 +270,16 @@
                     const context = canvas.getContext('2d');
                     context.drawImage(video, 0, 0, canvas.width, canvas.height);
                     
-                    // 直接取得ImageData以提高效能
                     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
                     
-                    // 計算平均亮度和邊緣
                     const averageBrightness = calculateAverageBrightness(imageData);
                     const averageEdge = calculateLaplacianEdge(
                         imageData, 
                         currentLapKernel
                     );
 
-                    // 更新狀態指示器
                     updateStatusPointer(averageEdge);
 
-                    // 更新分析結果顯示
                     analysisResultDiv.innerHTML = `
                     <div class="capture-info">
                         平均亮度: ${averageBrightness.toFixed(2)} 
@@ -234,22 +287,18 @@
                     </div>
                     `;
                     
-                    // 紀錄檢測結果
                     const isMatch = 
                         averageBrightness > BRIGHTNESS_THRESHOLD && 
                         averageEdge > MIN_EDGE_THRESHOLD && 
                         averageEdge < MAX_EDGE_THRESHOLD;
                     detectionResults.push({ time: currentTime, match: isMatch });
 
-                    // 移除超過兩秒的結果
                     detectionResults = detectionResults.filter(result => 
                         currentTime - result.time <= CHECK_WINDOW
                     );
 
-                    // 計算兩秒內的匹配次數
                     const matchCount = detectionResults.filter(result => result.match).length;
 
-                    // 判斷是否截圖
                     if (
                         matchCount >= REQUIRED_MATCH_COUNT && 
                         (currentTime - lastCaptureTime) >= MIN_CAPTURE_INTERVAL
@@ -260,12 +309,11 @@
                         resultDiv.appendChild(imgElement);
                         lastCaptureTime = currentTime;
 
-                        // 限制最多儲存10張圖片
                         if (resultDiv.children.length > 10) {
                             resultDiv.removeChild(resultDiv.firstChild);
                         }
                     }
-                }, 100); // 增加一個小的延遲以減少處理負擔
+                }, 100);
             };
         })();
 
@@ -277,21 +325,10 @@
                     debouncedCaptureImage();
                     lastTime = currentTime;
                 }
-                requestAnimationFrame(analyze);
+                analysisAnimationFrame = requestAnimationFrame(analyze);
             }
-            requestAnimationFrame(analyze);
+            analysisAnimationFrame = requestAnimationFrame(analyze);
         }
-
-        // 初始化
-        async function init() {
-            await startCamera();
-            video.addEventListener('loadedmetadata', () => {
-                startAnalysis();
-            });
-        }
-
-        // 頁面載入時初始化
-        init();
 
         // 監聽Laplacian核選擇器
         lapKernelSelect.addEventListener('change', (e) => {

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>名片掃描器</title>
+    <style>
+        #preview {
+            max-width: 100%;
+            display: block;
+            margin: 10px 0;
+        }
+        #result {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .capture-info {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 5px 0;
+        }
+        .selectBox {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 5px 0;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        .btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>名片掃描器（按鈕截圖版）</h1>
+    <video id="preview" width="640" height="360" autoplay playsinline></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+    
+    <div class="selectBox">
+        <label for="lapKernelSelect">選擇Laplacian核：</label>
+        <select id="lapKernelSelect">
+            <option value="standard">標準（4鄰接）</option>
+            <option value="8neighbor">8鄰接</option>
+            <option value="xor">XOR</option>
+        </select>
+    </div>
+
+    <button id="captureBtn" class="btn" disabled>截圖</button>
+
+    <div id="analysisResult"></div>
+    <div id="result"></div>
+
+    <script>
+        const lapKernelSelect = document.getElementById('lapKernelSelect');
+        const video = document.getElementById('preview');
+        const canvas = document.getElementById('canvas');
+        const captureBtn = document.getElementById('captureBtn');
+        const analysisResultDiv = document.getElementById('analysisResult');
+        const resultDiv = document.getElementById('result');
+        let stream = null;
+
+        // 檢測參數（與原程式碼相同）
+        const BRIGHTNESS_THRESHOLD = 120;
+        const MIN_EDGE_THRESHOLD = 10.5;
+        const MAX_EDGE_THRESHOLD = 14.5;
+
+        // 開啟攝像頭
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        facingMode: "environment"
+                    }
+                });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                    captureBtn.disabled = false; // 攝像頭ready後啟用按鈕
+                };
+            } catch (err) {
+                console.error('無法開啟攝像頭', err);
+                alert('無法開啟攝像頭，請檢查設備');
+            }
+        }
+
+        // 計算平均亮度（與原程式碼相同）
+        function calculateAverageBrightness(imageData) {
+            const data = imageData.data;
+            let totalBrightness = 0;
+
+            for (let i = 0; i < data.length; i += 4) {
+                const brightness = 
+                    0.299 * data[i] + 
+                    0.587 * data[i + 1] + 
+                    0.114 * data[i + 2];
+                totalBrightness += brightness;
+            }
+
+            return totalBrightness / (imageData.width * imageData.height);
+        }
+
+        // 計算Laplacian邊緣檢測（與原程式碼相同）
+        function calculateLaplacianEdge(imageData, lapKernel = 'standard') {
+            const data = imageData.data;
+            const width = imageData.width;
+            const height = imageData.height;
+            
+            const lapKernels = {
+                'standard': [
+                    [0, 1, 0],
+                    [1, -4, 1],
+                    [0, 1, 0]
+                ],
+                '8neighbor': [
+                    [1, 1, 1],
+                    [1, -8, 1],
+                    [1, 1, 1]
+                ],
+                'xor': [
+                    [-1, -1, -1],
+                    [-1,  8, -1],
+                    [-1, -1, -1]
+                ]
+            };
+
+            const lap = lapKernels[lapKernel] || lapKernels['standard'];
+
+            let totalEdgeStrength = 0;
+            let count = 0;
+
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    let edgeValue = 0;
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const index = ((y + dy) * width + (x + dx)) * 4;
+                            const grayValue = 
+                                0.299 * data[index] + 
+                                0.587 * data[index + 1] + 
+                                0.114 * data[index + 2];
+                            edgeValue += grayValue * lap[dy + 1][dx + 1];
+                        }
+                    }
+                    totalEdgeStrength += Math.abs(edgeValue);
+                    count++;
+                }
+            }
+
+            return totalEdgeStrength / count;
+        }
+
+        // 截圖函數
+        function captureImage() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+            
+            const averageBrightness = calculateAverageBrightness(imageData);
+            const averageEdge = calculateLaplacianEdge(imageData, lapKernelSelect.value);
+
+            // 更新分析結果顯示
+            analysisResultDiv.innerHTML = `
+            <div class="capture-info">
+                平均亮度: ${averageBrightness.toFixed(2)} 
+                Laplacian平均邊緣: ${averageEdge.toFixed(2)}
+            </div>
+            `;
+            
+            // 檢查影像是否符合條件
+            const isMatch = 
+                averageBrightness > BRIGHTNESS_THRESHOLD && 
+                averageEdge > MIN_EDGE_THRESHOLD && 
+                averageEdge < MAX_EDGE_THRESHOLD;
+
+            if (isMatch) {
+                const imgElement = document.createElement('img');
+                imgElement.src = canvas.toDataURL('image/jpeg');
+                imgElement.width = 200;
+                resultDiv.appendChild(imgElement);
+
+                // 限制最多儲存10張圖片
+                if (resultDiv.children.length > 10) {
+                    resultDiv.removeChild(resultDiv.firstChild);
+                }
+            } else {
+                alert('截圖不符合名片掃描條件，請調整角度或光線');
+            }
+        }
+
+        // 初始化
+        async function init() {
+            await startCamera();
+            
+            // 綁定截圖按鈕事件
+            captureBtn.addEventListener('click', captureImage);
+        }
+
+        // 頁面載入時初始化
+        init();
+    </script>
+</body>
+</html>
