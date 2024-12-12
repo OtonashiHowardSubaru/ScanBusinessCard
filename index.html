@@ -31,6 +31,7 @@
             border: 1px solid #000;
             position: relative;
             overflow: hidden;
+            border-radius: 5px;
         }
         #statusPointer {
             width: 30px;
@@ -44,13 +45,14 @@
             display: inline-block;
             padding: 10px 20px;
             margin: 10px 0;
-            background-color: #4CAF50;
+            background-color: #3ca03c;
             color: white;
-            border: none;
+            border: 1px solid black;
             cursor: pointer;
+            border-radius: 5px;
         }
         .camera-toggle.active {
-            background-color: #F44336;
+            background-color: #fe5562;
         }
     </style>
 </head>
@@ -119,7 +121,7 @@
                     averageEdge >= MIN_EDGE_THRESHOLD && 
                     averageEdge <= MAX_EDGE_THRESHOLD
                 ) {
-                    statusPointer.style.backgroundColor = 'red';
+                    statusPointer.style.backgroundColor = '#fe5562';
                 } else {
                     statusPointer.style.backgroundColor = 'black';
                 }
@@ -174,6 +176,7 @@
                 // 清空分析結果
                 analysisResultDiv.innerHTML = '';
                 statusPointer.style.left = '0px';
+                statusPointer.style.backgroundColor = 'black';
             }
         }
 
