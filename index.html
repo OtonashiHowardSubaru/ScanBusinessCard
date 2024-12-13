@@ -68,7 +68,8 @@
     </style>
 </head>
 <body>
-    <h1>名片掃描器</h1>
+    <h1>名片掃描器(單核 & 3秒4幀合格 & 開關鏡頭 & 保留捨棄)</h1>
+    <div>請將鏡頭對準名片後，保持靜止停留超過3秒</div>
     <video id="preview" width="640" height="360" autoplay playsinline></video>
     <canvas id="canvas" style="display:none;"></canvas>
     <button id="cameraToggle" class="camera-toggle">開啟攝像頭</button>
@@ -101,8 +102,8 @@
         const MIN_EDGE_THRESHOLD = 5;
         const MAX_EDGE_THRESHOLD = 14.5;
         const CAPTURE_INTERVAL = 500;
-        const CHECK_WINDOW = 2000;
-        const REQUIRED_MATCH_COUNT = 3;
+        const CHECK_WINDOW = 3000;
+        const REQUIRED_MATCH_COUNT = 4;
 
         let detectionResults = [];
 
